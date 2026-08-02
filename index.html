@@ -1385,8 +1385,24 @@ if(!storageOK)setTimeout(()=>toast('⚠ Storage is blocked in this view — use 
 </script>
 
 <script>
+/* Auto-updating service worker: checks for a new version on every open and
+   whenever the app returns to the foreground; when one takes over, the page
+   reloads itself once so updates apply without any manual refreshing. */
 if ('serviceWorker' in navigator) {
-  addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
+  addEventListener('load', async () => {
+    try {
+      const hadController = !!navigator.serviceWorker.controller;
+      const reg = await navigator.serviceWorker.register('sw.js');
+      reg.update();
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) reg.update(); });
+      let reloaded = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (!hadController || reloaded) return;
+        reloaded = true;
+        location.reload();
+      });
+    } catch (e) {}
+  });
 }
 </script>
 </body>

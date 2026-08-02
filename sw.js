@@ -1,9 +1,15 @@
-/* IRON·LOG service worker — cache-first so the app opens instantly and offline */
-const CACHE = 'ironlog-v6';
+/* IRON·LOG service worker — cache-first so the app opens instantly and offline.
+   On deploy: bump CACHE; install refetches assets bypassing the HTTP cache,
+   and the page auto-reloads once when the new worker takes control. */
+const CACHE = 'ironlog-v7';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  e.waitUntil(
+    caches.open(CACHE)
+      .then(c => c.addAll(ASSETS.map(u => new Request(u, { cache: 'no-cache' }))))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', e => {
