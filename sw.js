@@ -1,5 +1,5 @@
 /* IRON·LOG service worker — cache-first so the app opens instantly and offline */
-const CACHE = 'ironlog-v3';
+const CACHE = 'ironlog-v4';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {

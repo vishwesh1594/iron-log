@@ -642,19 +642,39 @@ function bwCard(tISO){
 }
 
 /* ============================================================ CLOUD SYNC (GitHub Gist) ============================================================ */
-let syncTimer=null;
+let syncTimer=null,syncBusy=false,syncQueued=false;
 function scheduleSync(){if(!SY.token)return;clearTimeout(syncTimer);syncTimer=setTimeout(()=>pushCloud(false),2500);}
+/* find an existing IRON·LOG backup gist on this account (prevents duplicates across devices) */
+async function findExistingGist(){
+  try{
+    const res=await fetch('https://api.github.com/gists?per_page=100',{headers:ghHeaders()});
+    if(!res.ok)return null;
+    const arr=await res.json();
+    const g=arr.find(x=>x.files&&x.files['ironlog-backup.json']);
+    return g?g.id:null;
+  }catch(e){return null;}
+}
 function ghHeaders(){return{'Authorization':'Bearer '+SY.token,'Accept':'application/vnd.github+json','Content-Type':'application/json'};}
 function syncLabel(){return SY.last?('Last synced '+new Date(SY.last).toLocaleString('en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})):'Never synced';}
 async function pushCloud(manual){
   if(!SY.token){if(manual)toast('Connect GitHub in Settings first');return;}
+  if(syncBusy){syncQueued=true;return;}   /* serialize: never two in-flight pushes */
+  syncBusy=true;
+  try{await pushCloudInner(manual);}
+  finally{syncBusy=false;if(syncQueued){syncQueued=false;scheduleSync();}}
+}
+async function pushCloudInner(manual){
   const payload=JSON.stringify({settings:S.settings,logs:S.logs,bw:S.bw},null,1);
   const body={description:'IRON·LOG data backup (auto-synced)',files:{'ironlog-backup.json':{content:payload}}};
   try{
     let res;
+    if(!SY.gistId){                       /* adopt an existing backup gist before ever creating one */
+      const existing=await findExistingGist();
+      if(existing){SY.gistId=existing;saveSync();}
+    }
     if(SY.gistId){
       res=await fetch('https://api.github.com/gists/'+SY.gistId,{method:'PATCH',headers:ghHeaders(),body:JSON.stringify(body)});
-      if(res.status===404){SY.gistId='';saveSync();return pushCloud(manual);}
+      if(res.status===404){SY.gistId='';saveSync();return pushCloudInner(manual);}
     }else{
       body.public=false;
       res=await fetch('https://api.github.com/gists',{method:'POST',headers:ghHeaders(),body:JSON.stringify(body)});
@@ -1121,11 +1141,15 @@ function openSheet(){
     }catch(e){toast('That doesn’t look like a valid backup');}
   });
   const sc=$('#syncconnect');
-  if(sc)sc.addEventListener('click',()=>{
+  if(sc)sc.addEventListener('click',async()=>{
     const t=$('#synctokenin').value.trim();
     if(!t){toast('Paste a token first');return;}
     SY.token=t;SY.gistId='';saveSync();
-    pushCloud(true).then(()=>openSheet());
+    /* new-phone flow: if a cloud backup already exists and this device is empty, pull instead of push */
+    const existing=await findExistingGist();
+    const hasLocal=Object.keys(S.logs).length>0||Object.keys(S.bw).length>0;
+    if(existing&&!hasLocal){SY.gistId=existing;saveSync();await restoreCloud();openSheet();}
+    else{await pushCloud(true);openSheet();}
   });
   const sn=$('#syncnow');if(sn)sn.addEventListener('click',()=>pushCloud(true));
   const sr=$('#syncrestore');
