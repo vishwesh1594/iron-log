@@ -52,7 +52,13 @@ header{padding:calc(14px + env(safe-area-inset-top,0)) 18px 0;position:sticky;to
   color:var(--accent-hi);border-radius:999px;padding:5px 12px;font-family:var(--disp);font-weight:600;
   font-size:14.5px;letter-spacing:.06em;text-transform:uppercase}
 .phasechip svg{opacity:.8}
-.daystrip{display:flex;gap:6px;margin-top:12px}
+.daystrip{display:flex;gap:5px;margin-top:12px;align-items:stretch}
+.weeknav{width:26px;border-radius:10px;background:var(--surface);border:1px solid var(--line);color:var(--muted);
+  font-size:19px;line-height:1;display:flex;align-items:center;justify-content:center;flex:none;padding-bottom:3px}
+.weeknav:active{transform:scale(.92)}
+#todaychip{display:none;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--line-strong);
+  color:var(--text);border-radius:999px;padding:5px 12px;font-family:var(--disp);font-weight:600;
+  font-size:14.5px;letter-spacing:.06em;text-transform:uppercase}
 .daypill{flex:1;border-radius:12px;padding:7px 0 6px;text-align:center;border:1px solid transparent;color:var(--muted)}
 .daypill .dw{font-size:10px;font-weight:600;letter-spacing:.12em;display:block}
 .daypill .dn{font-family:var(--disp);font-weight:700;font-size:17px;display:block;margin-top:1px;font-variant-numeric:tabular-nums}
@@ -96,8 +102,19 @@ main{flex:1;padding:4px 16px 150px}
 .ehrow .ehd b{color:var(--accent-hi);font-weight:600}
 .ehrow .ehsets{color:var(--text);font-variant-numeric:tabular-nums;text-align:right}
 .sets{padding:10px 10px 12px;display:flex;flex-direction:column;gap:6px}
-.setrow{display:grid;grid-template-columns:30px 1fr 1fr 46px;gap:8px;align-items:center;
+.setrow{display:grid;grid-template-columns:30px 1fr 1fr 46px;gap:8px;align-items:center;position:relative;
   background:var(--sunken);border:1px solid transparent;border-radius:11px;padding:6px 6px 6px 10px;transition:border-color .18s,background .18s}
+.liftfx{position:absolute;right:8px;top:50%;width:52px;height:34px;pointer-events:none;z-index:6;
+  transform:translateY(-50%);opacity:0}
+@media (prefers-reduced-motion:no-preference){
+  .liftfx{animation:barlift .85s cubic-bezier(.3,.9,.4,1) forwards}
+  @keyframes barlift{
+    0%{transform:translateY(-30%) scale(.55);opacity:0}
+    22%{transform:translateY(-38%) scale(1);opacity:1}
+    42%{transform:translateY(-16%) scale(1.06,.94)}
+    62%{transform:translateY(-120%) scale(.98,1.04);opacity:1}
+    100%{transform:translateY(-210%) scale(1);opacity:0}}
+}
 .setrow .sn{font-family:var(--disp);font-weight:700;font-size:15px;color:var(--faint);font-variant-numeric:tabular-nums}
 .setrow .fld{position:relative}
 .setrow input{width:100%;padding:9px 8px 9px 10px;font-size:16.5px;font-weight:600;text-align:center;
@@ -267,6 +284,7 @@ main{flex:1;padding:4px 16px 150px}
       </div>
     </div>
     <div class="phaserow">
+      <button id="todaychip">&#8634; Today</button>
       <button class="phasechip" id="phasebtn">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 3v18M18 3v18M2 8h4M2 16h4M18 8h4M18 16h4M6 12h12"/></svg>
         <span id="phaselabel"></span>
@@ -355,7 +373,7 @@ const PROGRAM=[
     {n:'Zottman Curls',w:['3x12','3x12','3x12','3x12']}]},
   sun:{rest:true,note:'1 hour walk OR 10K steps'}}},
 
-{id:'p4',name:'Phase 2',level:'Level 2',weeks:['Week 1','Week 2','Week 3','Week 4'],days:{
+{id:'p4',name:'Phase 2',weeks:['Week 1','Week 2','Week 3','Week 4'],days:{
   mon:{title:'Upper Body',type:'upper',ex:[
     {n:'Deadlift',note:'2–3 warm-up sets of 5 reps',w:['4x8','4x8','4x8','5x5']},
     {n:'Barbell Rows',w:['4x10','4x10','4x10','4x10']},
@@ -487,7 +505,7 @@ const PROGRAM=[
     {n:'DB Hammer Curl',w:['3x12','3x12','3x12','3x12']}]},
   sun:{steps:true}}},
 
-{id:'p7',name:'Phase 5',level:'Advanced',weeks:['Week 1','Week 2','Week 3','Week 4'],days:{
+{id:'p7',name:'Phase 5',weeks:['Week 1','Week 2','Week 3','Week 4'],days:{
   mon:{title:'Lower Body',type:'lower',ex:[
     {n:'Barbell Squats',note:'2–3 warm-up sets of 5 reps',w:['5x4-6','5x4-6','6x3','6x3']},
     {n:'Leg Extensions',w:['4x8','4x8','4x8','4x8']},
@@ -571,8 +589,15 @@ function iso(d){const p=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+
 function todayISO(){return iso(new Date());}
 function mondayOf(d){const x=new Date(d);const day=(x.getDay()+6)%7;x.setDate(x.getDate()-day);x.setHours(0,0,0,0);return x;}
 function todayDayKey(){return DAY_KEYS[(new Date().getDay()+6)%7];}
-/* date (ISO) of the currently selected pill within this week */
-function selDate(){const m=mondayOf(new Date());m.setDate(m.getDate()+DAY_KEYS.indexOf(ui.selDay));return iso(m);}
+/* date (ISO) of the selected pill in the viewed week (weekOff weeks from now) */
+function selDate(){const m=mondayOf(new Date());m.setDate(m.getDate()+ui.weekOff*7+DAY_KEYS.indexOf(ui.selDay));return iso(m);}
+/* which phase+week of the program a viewed week maps to, rolling across phases */
+function progAt(off){
+  let p=S.settings.phase,w=S.settings.week+off;
+  while(w>3&&p<PROGRAM.length-1){w-=4;p++;}
+  while(w<0&&p>0){p--;w+=4;}
+  return{p:p,w:Math.max(0,Math.min(3,w))};
+}
 
 /* auto-advance week: anchored to the Monday of the week it was set */
 (function autoAdvance(){
@@ -601,12 +626,12 @@ function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;');}
 function fmtDate(isoStr){const d=new Date(isoStr+'T12:00:00');
   return d.toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short'});}
 
-let ui={tab:'today',selDay:todayDayKey()};
+let ui={tab:'today',selDay:todayDayKey(),weekOff:0};
 
 function curPhase(){return PROGRAM[S.settings.phase];}
 function log(dateStr){return S.logs[dateStr];}
-function ensureLog(dateStr,dayKey){
-  if(!S.logs[dateStr])S.logs[dateStr]={phase:S.settings.phase,week:S.settings.week,day:dayKey,sets:{},checks:{}};
+function ensureLog(dateStr,dayKey,ph,wk){
+  if(!S.logs[dateStr])S.logs[dateStr]={phase:ph!=null?ph:S.settings.phase,week:wk!=null?wk:S.settings.week,day:dayKey,sets:{},checks:{}};
   return S.logs[dateStr];
 }
 /* most recent previous session containing this exercise */
@@ -650,7 +675,7 @@ function bwCard(tISO){
     delta='<b>'+(d>0?'+':'')+d+' kg</b>vs '+fmtDate(prev.date).replace(/^\w+ /,'');
   }else if(prev){delta='<b>'+prev.kg+'</b>last · '+fmtDate(prev.date).replace(/^\w+ /,'');}
   return '<div class="card bwcard"><div class="bwlbl"><div class="t">Body Weight</div><small>'+fmtDate(tISO)+'</small></div>'+
-    '<div class="bwfield"><input id="bwin" type="text" inputmode="decimal" placeholder="'+(prev?prev.kg:'kg')+'" value="'+(cur!=null?cur:'')+'" aria-label="Body weight kg"><span class="unit">KG</span></div>'+
+    '<div class="bwfield"><input id="bwin" type="text" inputmode="decimal" placeholder="'+(prev?prev.kg:'–')+'" value="'+(cur!=null?cur:'')+'" aria-label="Body weight kg"><span class="unit">KG</span></div>'+
     '<div class="bwdelta" id="bwdelta">'+delta+'</div></div>';
 }
 
@@ -740,30 +765,100 @@ function hideTimer(){clearInterval(timer.iv);$('#timerbar').classList.remove('sh
 $('#tplus').addEventListener('click',()=>{timer.end+=30000;timer.total+=30;$('#timerbar').classList.remove('zero');clearInterval(timer.iv);timer.iv=setInterval(tickTimer,250);tickTimer();});
 $('#tskip').addEventListener('click',hideTimer);
 
+/* barbell feedback on completed sets */
+function spawnLift(row){
+  if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+  const fx=document.createElement('div');
+  fx.className='liftfx';
+  fx.innerHTML='<svg viewBox="0 0 120 70" width="52" height="34">'+
+    '<rect x="8" y="31" width="104" height="8" rx="4" fill="#E8A33D"/>'+
+    '<rect x="26" y="8" width="12" height="54" rx="5" fill="#F2B44D"/>'+
+    '<rect x="82" y="8" width="12" height="54" rx="5" fill="#F2B44D"/>'+
+    '<rect x="12" y="18" width="10" height="34" rx="4" fill="#E8A33D"/>'+
+    '<rect x="98" y="18" width="10" height="34" rx="4" fill="#E8A33D"/></svg>';
+  row.appendChild(fx);
+  setTimeout(()=>fx.remove(),900);
+}
+
+/* ============================================================ SHARE ============================================================ */
+function shareBtn(){
+  return '<button class="iconbtn" id="sharebtn" aria-label="Share this day" style="margin-left:auto;flex:none">'+
+    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/></svg></button>';
+}
+function buildShareText(dayKey,tISO,vP,vW){
+  const ph=PROGRAM[vP],day=ph.days[dayKey],l=log(tISO);
+  const lines=['\u{1F3CB}\uFE0F IRON\u00B7LOG \u2014 '+fmtDate(tISO)];
+  if(day.rest||day.steps){
+    lines.push(day.rest?'Rest day \u00B7 '+(day.note||'recovery'):'Active recovery \u00B7 10K steps');
+    if(l&&l.checks&&l.checks.goal)lines.push('\u2705 Goal done');
+  }else{
+    lines.push(day.title+(day.sub?' ('+day.sub+')':'')+' \u00B7 '+ph.name+' \u00B7 '+ph.weeks[vW]);
+    const p=setsDoneCount(l,day,vW);
+    let vol=0;
+    if(l&&l.sets)Object.values(l.sets).forEach(a=>a.forEach(x=>{if(x&&x.d){const w=parseFloat(x.w),r=parseFloat(x.r);if(w&&r)vol+=w*r;}}));
+    if(p.done>0){
+      lines.push('\u2705 '+p.done+'/'+p.total+' sets'+(vol?' \u00B7 '+(Math.round(vol/100)/10)+' t lifted':''));
+      lines.push('');
+      day.ex.forEach(e=>{
+        const arr=l&&l.sets&&l.sets[slug(e.n)];
+        if(!arr||!arr.some(x=>x&&x.d))return;
+        lines.push(e.n+': '+arr.filter(x=>x&&x.d).map(x=>(x.w||'\u2013')+'\u00D7'+(x.r||'\u2013')).join(', '));
+      });
+    }else{
+      lines.push('Today\u2019s plan:');
+      lines.push('');
+      day.ex.forEach(e=>{const t=parseT(e.w[vW]);lines.push('\u2022 '+e.n+' \u2014 '+t.sets+'\u00D7'+t.reps);});
+    }
+  }
+  if(S.bw[tISO]!=null)lines.push('','Body weight: '+S.bw[tISO]+' kg');
+  return lines.join('\n');
+}
+async function shareDay(dayKey,tISO,vP,vW){
+  const text=buildShareText(dayKey,tISO,vP,vW);
+  if(navigator.share){
+    try{await navigator.share({text:text});}catch(e){/* user cancelled */}
+  }else{
+    try{await navigator.clipboard.writeText(text);toast('Copied \u2014 paste it into any chat');}
+    catch(e){toast('Sharing not available here');}
+  }
+}
+
 /* ============================================================ HEADER ============================================================ */
 function renderHeader(){
-  const ph=curPhase();
-  $('#phaselabel').textContent=(ph.level?ph.level+' · ':'')+ph.name+' — '+ph.weeks[S.settings.week];
+  const v=progAt(ui.weekOff);
+  const ph=PROGRAM[v.p];
+  $('#phaselabel').textContent=ph.name+' — '+ph.weeks[v.w];
+  const home=ui.weekOff===0&&ui.selDay===todayDayKey();
+  $('#todaychip').style.display=home?'none':'inline-flex';
   const strip=$('#daystrip');strip.innerHTML='';
-  const mon=mondayOf(new Date());
+  const mon=mondayOf(new Date());mon.setDate(mon.getDate()+ui.weekOff*7);
   const tk=todayDayKey();
+  const mkNav=(dir,label)=>{
+    const b=document.createElement('button');
+    b.className='weeknav';b.setAttribute('aria-label',label);
+    b.innerHTML=dir<0?'&lsaquo;':'&rsaquo;';
+    b.addEventListener('click',()=>{ui.weekOff+=dir;renderHeader();render();});
+    return b;
+  };
+  strip.appendChild(mkNav(-1,'Previous week'));
   DAY_KEYS.forEach((k,i)=>{
     const d=new Date(mon);d.setDate(d.getDate()+i);
     const el=document.createElement('button');
-    el.className='daypill'+(k===ui.selDay?' sel':'')+(k===tk?' today':'');
+    el.className='daypill'+(k===ui.selDay?' sel':'')+(ui.weekOff===0&&k===tk?' today':'');
     const dl=S.logs[iso(d)];
     if(dl&&((dl.sets&&Object.values(dl.sets).some(a=>a.some(s=>s&&s.d)))||(dl.checks&&Object.values(dl.checks).some(Boolean))))el.classList.add('logged');
     el.innerHTML='<span class="dw">'+k.slice(0,3).toUpperCase()+'</span><span class="dn">'+d.getDate()+'</span><span class="dot"></span>';
     el.addEventListener('click',()=>{ui.selDay=k;renderHeader();render();});
     strip.appendChild(el);
   });
+  strip.appendChild(mkNav(1,'Next week'));
 }
 
 /* ============================================================ TODAY VIEW ============================================================ */
-function setsDoneCount(l,day){
+function setsDoneCount(l,day,wk){
   let done=0,total=0;
   (day.ex||[]).forEach(e=>{
-    const t=parseT(e.w[S.settings.week]);total+=t.sets;
+    const t=parseT(e.w[wk!=null?wk:S.settings.week]);total+=t.sets;
     const arr=l&&l.sets&&l.sets[slug(e.n)];
     if(arr)done+=arr.filter(s=>s&&s.d).length;
   });
@@ -772,7 +867,8 @@ function setsDoneCount(l,day){
 
 function renderToday(){
   const v=$('#view');
-  const dayKey=ui.selDay, ph=curPhase(), day=ph.days[dayKey];
+  const pos=progAt(ui.weekOff), vP=pos.p, vW=pos.w;
+  const dayKey=ui.selDay, ph=PROGRAM[vP], day=ph.days[dayKey];
   const tISO=selDate();               /* each weekday logs against its own date */
   const isToday=tISO===todayISO();
   const l=log(tISO);
@@ -782,8 +878,8 @@ function renderToday(){
   if(day.steps||day.rest){
     const checked=l&&l.checks&&l.checks.goal;
     h+='<div class="sessionhead"><div><h1>'+(day.rest?'Rest Day':'Active Recovery')+'</h1>'+
-       '<div class="sub">'+fmtDate(tISO)+(day.rest?' · Recovery':'')+'</div></div></div>';
-    if(!isToday)h+='<div style="margin:-2px 0 12px"><span class="futurechip">'+(tISO>todayISO()?'Logging ahead':'Backfilling')+' · '+fmtDate(tISO)+'</span></div>';
+       '<div class="sub">'+fmtDate(tISO)+(day.rest?' · Recovery':'')+'</div></div>'+shareBtn()+'</div>';
+    if(!isToday)h+='<div style="margin:-2px 0 12px"><span class="futurechip">'+(tISO>todayISO()?'Logging ahead':'Backfilling')+' · '+fmtDate(tISO)+' · '+ph.name+' W'+(vW+1)+'</span></div>';
     h+=bwCard(tISO);
     h+='<div class="restcard"><div class="big">'+(day.rest?'REST':'10K')+'</div>'+
        '<div class="lbl">'+(day.rest?(day.note||'Recovery'):'steps today')+'</div>'+
@@ -795,16 +891,16 @@ function renderToday(){
     if(dayKey==='wed')h+=chkCard('abs','Ab Workout',ABS.wed,l,editable,'abs');
     if(!day.rest)h+=chkCard('cardio','Cardio',[{n:'Fast walking',q:'20 min'}],l,editable,'run');
   }else{
-    const p=setsDoneCount(l,day);
+    const p=setsDoneCount(l,day,vW);
     const pct=p.total?Math.round(100*p.done/p.total):0;
     const C=2*Math.PI*24;
     h+='<div class="sessionhead">'+
       '<div class="ring"><svg width="56" height="56"><circle cx="28" cy="28" r="24" fill="none" stroke="var(--line)" stroke-width="5"/>'+
       '<circle cx="28" cy="28" r="24" fill="none" stroke="'+(pct>=100?'var(--good)':'var(--accent)')+'" stroke-width="5" stroke-linecap="round" stroke-dasharray="'+C+'" stroke-dashoffset="'+(C*(1-pct/100))+'"/></svg>'+
       '<div class="pct">'+pct+'<span style="font-size:9px">%</span></div></div>'+
-      '<div><h1>'+esc(day.title)+'</h1><div class="sub">'+fmtDate(tISO)+(day.sub?' · '+esc(day.sub):'')+' · '+p.done+' / '+p.total+' sets</div></div></div>';
+      '<div><h1>'+esc(day.title)+'</h1><div class="sub">'+fmtDate(tISO)+(day.sub?' · '+esc(day.sub):'')+' · '+p.done+' / '+p.total+' sets</div></div>'+shareBtn()+'</div>';
 
-    if(!isToday)h+='<div style="margin:-2px 0 12px"><span class="futurechip">'+(tISO>todayISO()?'Logging ahead':'Backfilling')+' · '+fmtDate(tISO)+'</span></div>';
+    if(!isToday)h+='<div style="margin:-2px 0 12px"><span class="futurechip">'+(tISO>todayISO()?'Logging ahead':'Backfilling')+' · '+fmtDate(tISO)+' · '+ph.name+' W'+(vW+1)+'</span></div>';
     h+=bwCard(tISO);
     /* warm-up */
     h+=chkCard('warmup','Warm-Up · '+(day.type==='lower'?'Lower':'Upper'),WARMUP[day.type],l,editable,'flame');
@@ -814,11 +910,11 @@ function renderToday(){
     while(i<ex.length){
       if(ex[i].ss!=null){
         const g=ex[i].ss;let j=i;let cards='';
-        const rounds=parseT(ex[i].w[S.settings.week]).sets;
-        while(j<ex.length&&ex[j].ss===g){cards+=exCard(ex[j],l,editable,tISO);j++;}
+        const rounds=parseT(ex[i].w[vW]).sets;
+        while(j<ex.length&&ex[j].ss===g){cards+=exCard(ex[j],l,editable,tISO,vW);j++;}
         h+='<div class="ssgroup"><div class="sslabel">Superset · '+rounds+' rounds</div>'+cards+'</div>';
         i=j;
-      }else{h+=exCard(ex[i],l,editable,tISO);i++;}
+      }else{h+=exCard(ex[i],l,editable,tISO,vW);i++;}
     }
     /* abs on mon & sat */
     if(dayKey==='mon'||dayKey==='sat')h+=chkCard('abs','Ab Workout · End of Session',ABS.monsat,l,editable,'abs');
@@ -827,7 +923,7 @@ function renderToday(){
     h+=chkCard('cooldown','Cool-Down · '+(day.type==='lower'?'Lower':'Upper'),COOLDOWN[day.type],l,editable,'wind');
   }
   v.innerHTML=h;
-  bindToday(dayKey,tISO);
+  bindToday(dayKey,tISO,vP,vW);
 }
 
 const ICONS={
@@ -856,9 +952,9 @@ function chkCard(key,name,items,l,editable,icon){
   return h+'</div></details>';
 }
 
-function exCard(e,l,editable,tISO){
+function exCard(e,l,editable,tISO,vW){
   const sl=slug(e.n);
-  const t=parseT(e.w[S.settings.week]);
+  const t=parseT(e.w[vW!=null?vW:S.settings.week]);
   const saved=(l&&l.sets&&l.sets[sl])||[];
   const last=lastSession(sl,tISO);
   let lastChip='',histDiv='';
@@ -879,7 +975,7 @@ function exCard(e,l,editable,tISO){
     const prevW=(last&&last.sets[i]&&last.sets[i].w)||(last&&last.sets[0]&&last.sets[0].w)||'';
     rows+='<div class="setrow'+(s.d?' done':'')+'" data-ex="'+sl+'" data-i="'+i+'">'+
       '<span class="sn">'+(i+1)+'</span>'+
-      '<span class="fld"><input type="text" inputmode="decimal" class="w" placeholder="'+(prevW||'kg')+'" value="'+(s.w!=null?s.w:'')+'"'+(editable?'':' readonly')+' aria-label="Weight kg"><span class="unit">KG</span></span>'+
+      '<span class="fld"><input type="text" inputmode="decimal" class="w" placeholder="'+(prevW||'–')+'" value="'+(s.w!=null?s.w:'')+'"'+(editable?'':' readonly')+' aria-label="Weight kg"><span class="unit">KG</span></span>'+
       '<span class="fld"><input type="text" inputmode="numeric" class="r" placeholder="'+t.reps+'" value="'+(s.r!=null?s.r:'')+'"'+(editable?'':' readonly')+' aria-label="Reps"><span class="unit">REPS</span></span>'+
       '<button class="chk" aria-label="Complete set">'+
       '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></button></div>';
@@ -891,13 +987,13 @@ function exCard(e,l,editable,tISO){
     '<div class="sets">'+rows+'</div></div>';
 }
 
-function bindToday(dayKey,tISO){
+function bindToday(dayKey,tISO,vP,vW){
   const v=$('#view');
   v.querySelectorAll('.setrow .chk').forEach(btn=>{
     btn.addEventListener('click',()=>{
       const row=btn.closest('.setrow');
       const sl=row.dataset.ex,i=+row.dataset.i;
-      const l=ensureLog(tISO,dayKey);
+      const l=ensureLog(tISO,dayKey,vP,vW);
       if(!l.sets[sl])l.sets[sl]=[];
       const wIn=row.querySelector('.w'),rIn=row.querySelector('.r');
       const cur=l.sets[sl][i];
@@ -909,6 +1005,7 @@ function bindToday(dayKey,tISO){
       l.sets[sl][i]={w:w,r:r,d:1};
       wIn.value=w;rIn.value=r;
       row.classList.add('done');
+      spawnLift(row);
       if(navigator.vibrate)navigator.vibrate(35);
       /* copy weight down to later empty rows of this exercise */
       v.querySelectorAll('.setrow[data-ex="'+sl+'"]').forEach(o=>{
@@ -916,18 +1013,18 @@ function bindToday(dayKey,tISO){
       });
       saveState();renderHeaderOnly();
       /* rest timer from target reps */
-      const day=curPhase().days[dayKey];
+      const day=PROGRAM[vP].days[dayKey];
       const e=(day.ex||[]).find(x=>slug(x.n)===sl);
-      if(e)startTimer(restFor(parseT(e.w[S.settings.week]).repN));
+      if(e)startTimer(restFor(parseT(e.w[vW]).repN));
       /* update ring */
-      updateRing(dayKey,tISO);
+      updateRing(dayKey,tISO,vP,vW);
     });
   });
   v.querySelectorAll('.setrow input').forEach(inp=>{
     inp.addEventListener('change',()=>{
       const row=inp.closest('.setrow');
       const sl=row.dataset.ex,i=+row.dataset.i;
-      const l=ensureLog(tISO,dayKey);
+      const l=ensureLog(tISO,dayKey,vP,vW);
       if(!l.sets[sl])l.sets[sl]=[];
       const cur=l.sets[sl][i]||{d:0};
       cur.w=row.querySelector('.w').value.trim();
@@ -943,7 +1040,7 @@ function bindToday(dayKey,tISO){
   });
   v.querySelectorAll('[data-chk]').forEach(btn=>{
     btn.addEventListener('click',()=>{
-      const l=ensureLog(tISO,dayKey);
+      const l=ensureLog(tISO,dayKey,vP,vW);
       const k=btn.dataset.chk;
       l.checks[k]=!l.checks[k];
       btn.classList.toggle('on',l.checks[k]);
@@ -956,9 +1053,11 @@ function bindToday(dayKey,tISO){
   });
   const goal=v.querySelector('[data-goal]');
   if(goal)goal.addEventListener('click',()=>{
-    const l=ensureLog(tISO,dayKey);
+    const l=ensureLog(tISO,dayKey,vP,vW);
     l.checks.goal=!l.checks.goal;saveState();renderToday();renderHeaderOnly();
   });
+  const sh=v.querySelector('#sharebtn');
+  if(sh)sh.addEventListener('click',()=>shareDay(dayKey,tISO,vP,vW));
   const bw=v.querySelector('#bwin');
   if(bw)bw.addEventListener('change',()=>{
     const raw=bw.value.trim().replace(',','.');
@@ -971,10 +1070,10 @@ function bindToday(dayKey,tISO){
       dEl.innerHTML='<b>'+(d>0?'+':'')+d+' kg</b>vs '+fmtDate(prev.date).replace(/^\w+ /,'');}
   });
 }
-function updateRing(dayKey,tISO){
-  const day=curPhase().days[dayKey];if(!day.ex)return;
+function updateRing(dayKey,tISO,vP,vW){
+  const day=PROGRAM[vP!=null?vP:S.settings.phase].days[dayKey];if(!day.ex)return;
   const l=log(tISO);
-  const p=setsDoneCount(l,day);
+  const p=setsDoneCount(l,day,vW);
   const pct=p.total?Math.round(100*p.done/p.total):0;
   const ring=$('#view .ring');if(!ring)return;
   const C=2*Math.PI*24;
@@ -1185,6 +1284,7 @@ function closeSheet(){$('#sheet').classList.remove('show');$('#scrim').classList
 $('#scrim').addEventListener('click',closeSheet);
 $('#settingsbtn').addEventListener('click',openSheet);
 $('#phasebtn').addEventListener('click',openSheet);
+$('#todaychip').addEventListener('click',()=>{ui.weekOff=0;ui.selDay=todayDayKey();renderHeader();render();});
 
 async function doBackup(){
   const json=JSON.stringify(S,null,1);
@@ -1212,7 +1312,7 @@ $('#tabbar').addEventListener('click',e=>{
   const b=e.target.closest('.tab');if(!b)return;
   ui.tab=b.dataset.tab;
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('sel',t===b));
-  if(ui.tab==='today')ui.selDay=todayDayKey();
+  if(ui.tab==='today'){ui.selDay=todayDayKey();ui.weekOff=0;renderHeader();}
   render();window.scrollTo({top:0});
 });
 renderHeader();render();
