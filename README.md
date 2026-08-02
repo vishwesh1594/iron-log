@@ -20,6 +20,9 @@ IRON·LOG turns a coached PDF training plan into a daily companion app: open it 
 | 🔗 | **Supersets, warm-ups, abs & cardio** — superset rounds are visually paired; mobility warm-ups, cool-downs, ab routines and the daily 20-min walk are built-in checklists. |
 | 📈 | **Session volume & progress ring** — live completion ring while you train; history shows total tonnage lifted per session. |
 | 🗓️ | **5 full phases, 4 weeks each** — sets and reps update automatically as weeks progress (e.g. 4×8 → 5×5 on heavy movements); the week advances itself every Monday. |
+| ⚖️ | **Daily body-weight log** — quick kg entry on every day's screen, with day-to-day deltas and a 7-day trend in History. |
+| 📆 | **Log any day of the week** — work ahead or backfill a missed session; every weekday saves to its own date. |
+| ☁️ | **Free cloud sync (optional)** — auto-backs up to a private Gist on your own GitHub account after every change; restore on any device. No new accounts, no servers to pay for. |
 | 📴 | **100 % offline** — a service worker caches the whole app; it opens instantly with no signal in a basement gym. |
 | 🔒 | **Private by design** — all data stays in your browser's local storage; one-tap JSON backup & restore. |
 | 🌑 | **Gym-ready dark UI** — high-contrast graphite + amber design with a condensed athletic typeface, built for OLED screens and chalky thumbs. |

@@ -141,6 +141,19 @@ main{flex:1;padding:4px 16px 150px}
 .chkitem.on .lbl{color:var(--muted)}
 .chkitem .qty{font-size:12.5px;color:var(--accent-hi);font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:600}
 
+/* body weight */
+.bwcard{display:flex;align-items:center;gap:12px;padding:11px 15px}
+.bwlbl{flex:1}
+.bwlbl .t{font-family:var(--disp);font-weight:600;font-size:15.5px;letter-spacing:.06em;text-transform:uppercase}
+.bwlbl small{display:block;font-size:11px;color:var(--faint)}
+.bwfield{position:relative;width:110px}
+.bwfield input{width:100%;padding:9px 30px 9px 10px;font-size:16.5px;font-weight:600;text-align:center;font-variant-numeric:tabular-nums;min-height:42px}
+.bwfield .unit{position:absolute;right:9px;top:50%;transform:translateY(-50%);font-size:10.5px;color:var(--faint);letter-spacing:.05em}
+.bwdelta{font-size:12px;color:var(--muted);min-width:56px;text-align:right;font-variant-numeric:tabular-nums}
+.bwdelta b{display:block;font-family:var(--disp);font-weight:700;font-size:14px;color:var(--text)}
+.futurechip{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;letter-spacing:.08em;
+  color:var(--accent-hi);background:var(--accent-dim);border:1px solid rgba(232,163,61,.3);border-radius:999px;padding:3px 10px;text-transform:uppercase}
+
 /* rest day */
 .restcard{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:26px 20px;text-align:center;margin-bottom:12px}
 .restcard .big{font-family:var(--disp);font-weight:700;font-size:44px;color:var(--accent);letter-spacing:.02em;line-height:1}
@@ -540,18 +553,26 @@ function loadState(){
   return null;
 }
 function saveState(){
-  if(storageOK){try{localStorage.setItem(LS_KEY,JSON.stringify(S));return;}catch(e){storageOK=false;}}
-  memStore=S;
+  if(storageOK){try{localStorage.setItem(LS_KEY,JSON.stringify(S));scheduleSync();return;}catch(e){storageOK=false;}}
+  memStore=S;scheduleSync();
 }
 let S=loadState()||{settings:{phase:0,week:0,anchor:null},logs:{}};
 if(!S.settings)S.settings={phase:0,week:0,anchor:null};
 if(!S.logs)S.logs={};
+if(!S.bw)S.bw={};
+
+/* cloud-sync config lives in its own key so tokens never enter the synced payload */
+let SY={token:'',gistId:'',last:0};
+try{const raw=localStorage.getItem('vsironlog_sync');if(raw)SY=Object.assign(SY,JSON.parse(raw));}catch(e){}
+function saveSync(){try{localStorage.setItem('vsironlog_sync',JSON.stringify(SY));}catch(e){}}
 
 /* dates */
 function iso(d){const p=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());}
 function todayISO(){return iso(new Date());}
 function mondayOf(d){const x=new Date(d);const day=(x.getDay()+6)%7;x.setDate(x.getDate()-day);x.setHours(0,0,0,0);return x;}
 function todayDayKey(){return DAY_KEYS[(new Date().getDay()+6)%7];}
+/* date (ISO) of the currently selected pill within this week */
+function selDate(){const m=mondayOf(new Date());m.setDate(m.getDate()+DAY_KEYS.indexOf(ui.selDay));return iso(m);}
 
 /* auto-advance week: anchored to the Monday of the week it was set */
 (function autoAdvance(){
@@ -615,6 +636,69 @@ function exHistory(exSlug,max){
 function toast(msg,ms){const t=$('#toast');t.textContent=msg;t.classList.add('show');
   clearTimeout(toast._t);toast._t=setTimeout(()=>t.classList.remove('show'),ms||2600);}
 
+/* ============================================================ BODY WEIGHT ============================================================ */
+function prevBw(beforeDate){
+  const dates=Object.keys(S.bw).filter(d=>d<beforeDate).sort().reverse();
+  return dates.length?{date:dates[0],kg:S.bw[dates[0]]}:null;
+}
+function bwCard(tISO){
+  const cur=S.bw[tISO];
+  const prev=prevBw(tISO);
+  let delta='';
+  if(cur!=null&&prev){
+    const d=Math.round((cur-prev.kg)*10)/10;
+    delta='<b>'+(d>0?'+':'')+d+' kg</b>vs '+fmtDate(prev.date).replace(/^\w+ /,'');
+  }else if(prev){delta='<b>'+prev.kg+'</b>last · '+fmtDate(prev.date).replace(/^\w+ /,'');}
+  return '<div class="card bwcard"><div class="bwlbl"><div class="t">Body Weight</div><small>'+fmtDate(tISO)+'</small></div>'+
+    '<div class="bwfield"><input id="bwin" type="text" inputmode="decimal" placeholder="'+(prev?prev.kg:'kg')+'" value="'+(cur!=null?cur:'')+'" aria-label="Body weight kg"><span class="unit">KG</span></div>'+
+    '<div class="bwdelta" id="bwdelta">'+delta+'</div></div>';
+}
+
+/* ============================================================ CLOUD SYNC (GitHub Gist) ============================================================ */
+let syncTimer=null;
+function scheduleSync(){if(!SY.token)return;clearTimeout(syncTimer);syncTimer=setTimeout(()=>pushCloud(false),2500);}
+function ghHeaders(){return{'Authorization':'Bearer '+SY.token,'Accept':'application/vnd.github+json','Content-Type':'application/json'};}
+function syncLabel(){return SY.last?('Last synced '+new Date(SY.last).toLocaleString('en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})):'Never synced';}
+async function pushCloud(manual){
+  if(!SY.token){if(manual)toast('Connect GitHub in Settings first');return;}
+  const payload=JSON.stringify({settings:S.settings,logs:S.logs,bw:S.bw},null,1);
+  const body={description:'IRON·LOG data backup (auto-synced)',files:{'ironlog-backup.json':{content:payload}}};
+  try{
+    let res;
+    if(SY.gistId){
+      res=await fetch('https://api.github.com/gists/'+SY.gistId,{method:'PATCH',headers:ghHeaders(),body:JSON.stringify(body)});
+      if(res.status===404){SY.gistId='';saveSync();return pushCloud(manual);}
+    }else{
+      body.public=false;
+      res=await fetch('https://api.github.com/gists',{method:'POST',headers:ghHeaders(),body:JSON.stringify(body)});
+    }
+    if(res.status===401||res.status===403)throw{code:'auth'};
+    if(!res.ok)throw{code:'http',status:res.status};
+    const j=await res.json();
+    SY.gistId=j.id;SY.last=Date.now();saveSync();
+    const el=document.getElementById('synclast');if(el)el.textContent=syncLabel();
+    if(manual)toast('Synced to your GitHub ✓');
+  }catch(e){
+    if(manual)toast(e&&e.code==='auth'?'Token rejected — it needs the “gist” permission':'Sync failed — check connection & try again');
+  }
+}
+async function restoreCloud(){
+  if(!SY.token||!SY.gistId){toast(SY.token?'Nothing synced yet':'Connect GitHub first');return;}
+  try{
+    const res=await fetch('https://api.github.com/gists/'+SY.gistId,{headers:ghHeaders()});
+    if(!res.ok)throw 0;
+    const j=await res.json();
+    const f=j.files&&j.files['ironlog-backup.json'];
+    if(!f)throw 0;
+    let content=f.content;
+    if(f.truncated){content=await (await fetch(f.raw_url)).text();}
+    const data=JSON.parse(content);
+    if(!data.settings||!data.logs)throw 0;
+    S={settings:data.settings,logs:data.logs,bw:data.bw||{}};
+    saveState();closeSheet();renderHeader();render();toast('Restored from cloud ✓');
+  }catch(e){toast('Could not restore from cloud');}
+}
+
 /* ============================================================ REST TIMER ============================================================ */
 const timer={end:0,total:0,iv:null};
 function startTimer(secs){
@@ -669,17 +753,18 @@ function setsDoneCount(l,day){
 function renderToday(){
   const v=$('#view');
   const dayKey=ui.selDay, ph=curPhase(), day=ph.days[dayKey];
-  const isToday=dayKey===todayDayKey();
-  const tISO=todayISO();
+  const tISO=selDate();               /* each weekday logs against its own date */
+  const isToday=tISO===todayISO();
   const l=log(tISO);
-  /* editable if viewing today's weekday, or today's log was explicitly started for this day */
-  const editable=isToday||(l&&l.day===dayKey);
+  const editable=true;
   let h='';
 
   if(day.steps||day.rest){
-    const checked=l&&l.day===dayKey&&l.checks&&l.checks.goal;
+    const checked=l&&l.checks&&l.checks.goal;
     h+='<div class="sessionhead"><div><h1>'+(day.rest?'Rest Day':'Active Recovery')+'</h1>'+
-       '<div class="sub">'+DAY_NAMES[dayKey]+(day.rest?' · Recovery':'')+'</div></div></div>';
+       '<div class="sub">'+fmtDate(tISO)+(day.rest?' · Recovery':'')+'</div></div></div>';
+    if(!isToday)h+='<div style="margin:-2px 0 12px"><span class="futurechip">'+(tISO>todayISO()?'Logging ahead':'Backfilling')+' · '+fmtDate(tISO)+'</span></div>';
+    h+=bwCard(tISO);
     h+='<div class="restcard"><div class="big">'+(day.rest?'REST':'10K')+'</div>'+
        '<div class="lbl">'+(day.rest?(day.note||'Recovery'):'steps today')+'</div>'+
        (day.rest?'':'<p>Get your steps in — walking counts.</p>')+
@@ -690,19 +775,17 @@ function renderToday(){
     if(dayKey==='wed')h+=chkCard('abs','Ab Workout',ABS.wed,l,editable,'abs');
     if(!day.rest)h+=chkCard('cardio','Cardio',[{n:'Fast walking',q:'20 min'}],l,editable,'run');
   }else{
-    const p=setsDoneCount(l&&l.day===dayKey?l:null,day);
+    const p=setsDoneCount(l,day);
     const pct=p.total?Math.round(100*p.done/p.total):0;
     const C=2*Math.PI*24;
     h+='<div class="sessionhead">'+
       '<div class="ring"><svg width="56" height="56"><circle cx="28" cy="28" r="24" fill="none" stroke="var(--line)" stroke-width="5"/>'+
       '<circle cx="28" cy="28" r="24" fill="none" stroke="'+(pct>=100?'var(--good)':'var(--accent)')+'" stroke-width="5" stroke-linecap="round" stroke-dasharray="'+C+'" stroke-dashoffset="'+(C*(1-pct/100))+'"/></svg>'+
       '<div class="pct">'+pct+'<span style="font-size:9px">%</span></div></div>'+
-      '<div><h1>'+esc(day.title)+'</h1><div class="sub">'+DAY_NAMES[dayKey]+(day.sub?' · '+esc(day.sub):'')+' · '+p.done+' / '+p.total+' sets</div></div></div>';
+      '<div><h1>'+esc(day.title)+'</h1><div class="sub">'+fmtDate(tISO)+(day.sub?' · '+esc(day.sub):'')+' · '+p.done+' / '+p.total+' sets</div></div></div>';
 
-    if(!editable){
-      h+='<div class="banner"><span>Previewing <b>'+DAY_NAMES[dayKey]+'</b>. Logging is for today’s session.</span>'+
-         '<button class="linkbtn" data-swapday="1">Do this workout today instead →</button></div>';
-    }
+    if(!isToday)h+='<div style="margin:-2px 0 12px"><span class="futurechip">'+(tISO>todayISO()?'Logging ahead':'Backfilling')+' · '+fmtDate(tISO)+'</span></div>';
+    h+=bwCard(tISO);
     /* warm-up */
     h+=chkCard('warmup','Warm-Up · '+(day.type==='lower'?'Lower':'Upper'),WARMUP[day.type],l,editable,'flame');
 
@@ -712,10 +795,10 @@ function renderToday(){
       if(ex[i].ss!=null){
         const g=ex[i].ss;let j=i;let cards='';
         const rounds=parseT(ex[i].w[S.settings.week]).sets;
-        while(j<ex.length&&ex[j].ss===g){cards+=exCard(ex[j],l,editable);j++;}
+        while(j<ex.length&&ex[j].ss===g){cards+=exCard(ex[j],l,editable,tISO);j++;}
         h+='<div class="ssgroup"><div class="sslabel">Superset · '+rounds+' rounds</div>'+cards+'</div>';
         i=j;
-      }else{h+=exCard(ex[i],l,editable);i++;}
+      }else{h+=exCard(ex[i],l,editable,tISO);i++;}
     }
     /* abs on mon & sat */
     if(dayKey==='mon'||dayKey==='sat')h+=chkCard('abs','Ab Workout · End of Session',ABS.monsat,l,editable,'abs');
@@ -724,7 +807,7 @@ function renderToday(){
     h+=chkCard('cooldown','Cool-Down · '+(day.type==='lower'?'Lower':'Upper'),COOLDOWN[day.type],l,editable,'wind');
   }
   v.innerHTML=h;
-  bindToday(dayKey,editable);
+  bindToday(dayKey,tISO);
 }
 
 const ICONS={
@@ -753,11 +836,11 @@ function chkCard(key,name,items,l,editable,icon){
   return h+'</div></details>';
 }
 
-function exCard(e,l,editable){
+function exCard(e,l,editable,tISO){
   const sl=slug(e.n);
   const t=parseT(e.w[S.settings.week]);
   const saved=(l&&l.sets&&l.sets[sl])||[];
-  const last=lastSession(sl,todayISO());
+  const last=lastSession(sl,tISO);
   let lastChip='',histDiv='';
   if(last){
     const done=last.sets.filter(s=>s&&s.d);
@@ -788,14 +871,13 @@ function exCard(e,l,editable){
     '<div class="sets">'+rows+'</div></div>';
 }
 
-function bindToday(dayKey,editable){
+function bindToday(dayKey,tISO){
   const v=$('#view');
   v.querySelectorAll('.setrow .chk').forEach(btn=>{
     btn.addEventListener('click',()=>{
-      if(!editable){toast('Previewing — switch to today to log');return;}
       const row=btn.closest('.setrow');
       const sl=row.dataset.ex,i=+row.dataset.i;
-      const l=ensureLog(todayISO(),dayKey);
+      const l=ensureLog(tISO,dayKey);
       if(!l.sets[sl])l.sets[sl]=[];
       const wIn=row.querySelector('.w'),rIn=row.querySelector('.r');
       const cur=l.sets[sl][i];
@@ -818,15 +900,14 @@ function bindToday(dayKey,editable){
       const e=(day.ex||[]).find(x=>slug(x.n)===sl);
       if(e)startTimer(restFor(parseT(e.w[S.settings.week]).repN));
       /* update ring */
-      updateRing(dayKey);
+      updateRing(dayKey,tISO);
     });
   });
   v.querySelectorAll('.setrow input').forEach(inp=>{
     inp.addEventListener('change',()=>{
-      if(!editable)return;
       const row=inp.closest('.setrow');
       const sl=row.dataset.ex,i=+row.dataset.i;
-      const l=ensureLog(todayISO(),dayKey);
+      const l=ensureLog(tISO,dayKey);
       if(!l.sets[sl])l.sets[sl]=[];
       const cur=l.sets[sl][i]||{d:0};
       cur.w=row.querySelector('.w').value.trim();
@@ -842,8 +923,7 @@ function bindToday(dayKey,editable){
   });
   v.querySelectorAll('[data-chk]').forEach(btn=>{
     btn.addEventListener('click',()=>{
-      if(!editable){toast('Previewing — switch to today to log');return;}
-      const l=ensureLog(todayISO(),dayKey);
+      const l=ensureLog(tISO,dayKey);
       const k=btn.dataset.chk;
       l.checks[k]=!l.checks[k];
       btn.classList.toggle('on',l.checks[k]);
@@ -856,21 +936,25 @@ function bindToday(dayKey,editable){
   });
   const goal=v.querySelector('[data-goal]');
   if(goal)goal.addEventListener('click',()=>{
-    const l=ensureLog(todayISO(),dayKey);
+    const l=ensureLog(tISO,dayKey);
     l.checks.goal=!l.checks.goal;saveState();renderToday();renderHeaderOnly();
   });
-  const swap=v.querySelector('[data-swapday]');
-  if(swap)swap.addEventListener('click',()=>{
-    const ex=log(todayISO());
-    if(ex&&ex.day!==dayKey&&Object.keys(ex.sets||{}).length){toast('Today already has a logged session');return;}
-    ensureLog(todayISO(),dayKey).day=dayKey;saveState();renderToday();
-    toast(DAY_NAMES[dayKey]+'’s session is now active for today');
+  const bw=v.querySelector('#bwin');
+  if(bw)bw.addEventListener('change',()=>{
+    const raw=bw.value.trim().replace(',','.');
+    if(raw===''){delete S.bw[tISO];saveState();renderHeaderOnly();return;}
+    const val=parseFloat(raw);
+    if(isNaN(val)||val<25||val>350){toast('Enter a valid weight in kg');return;}
+    S.bw[tISO]=Math.round(val*10)/10;saveState();toast('Body weight saved ✓');
+    const prev=prevBw(tISO);const dEl=v.querySelector('#bwdelta');
+    if(dEl&&prev){const d=Math.round((S.bw[tISO]-prev.kg)*10)/10;
+      dEl.innerHTML='<b>'+(d>0?'+':'')+d+' kg</b>vs '+fmtDate(prev.date).replace(/^\w+ /,'');}
   });
 }
-function updateRing(dayKey){
+function updateRing(dayKey,tISO){
   const day=curPhase().days[dayKey];if(!day.ex)return;
-  const l=log(todayISO());
-  const p=setsDoneCount(l&&l.day===dayKey?l:null,day);
+  const l=log(tISO);
+  const p=setsDoneCount(l,day);
   const pct=p.total?Math.round(100*p.done/p.total):0;
   const ring=$('#view .ring');if(!ring)return;
   const C=2*Math.PI*24;
@@ -937,6 +1021,29 @@ function renderHistory(){
       return (l.sets&&Object.values(l.sets).some(a=>a.some(s=>s&&s.d)))||(l.checks&&Object.values(l.checks).some(Boolean));});
   let h='<div class="sessionhead" style="margin-top:14px"><div><h1>History</h1>'+
     '<div class="sub">'+dates.length+' session'+(dates.length===1?'':'s')+' logged</div></div></div>';
+
+  /* body-weight trend */
+  const bwDates=Object.keys(S.bw).sort().reverse();
+  if(bwDates.length){
+    const latest=bwDates[0];
+    const weekAgoISO=(()=>{const d=new Date(latest+'T12:00:00');d.setDate(d.getDate()-7);return iso(d);})();
+    const ref=bwDates.find(d=>d<=weekAgoISO);
+    let trend='';
+    if(ref){const d7=Math.round((S.bw[latest]-S.bw[ref])*10)/10;
+      trend='<span class="lastchip">'+(d7>0?'+':'')+d7+' kg over 7 days</span>';}
+    h+='<div class="card"><div class="exhead"><div class="exname">Body Weight</div>'+
+      '<div class="target">'+S.bw[latest]+' kg</div></div>'+
+      '<div class="exmeta"><span class="note">Latest · '+fmtDate(latest)+'</span>'+trend+'</div>'+
+      '<div class="histbody" style="padding-top:6px">'+
+      bwDates.slice(0,8).map((d,i)=>{
+        const nxt=bwDates[i+1];
+        const dl=nxt!=null?Math.round((S.bw[d]-S.bw[nxt])*10)/10:null;
+        return '<div class="ehrow"><span class="ehd">'+fmtDate(d)+'</span>'+
+          '<span class="ehsets">'+S.bw[d]+' kg'+(dl!=null?' <span style="color:var(--faint)">('+(dl>0?'+':'')+dl+')</span>':'')+'</span></div>';
+      }).join('')+
+      '</div></div>';
+  }
+
   if(!dates.length){
     h+='<div class="empty"><div class="glyph">— KG —</div><p style="margin-top:10px">No sessions yet.<br>Your logged workouts will appear here.</p></div>';
     $('#view').innerHTML=h;return;
@@ -996,6 +1103,15 @@ function openSheet(){
     '<button class="sheetbtn" id="restorebtn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg><span>Restore from backup<small>Paste a previously saved backup</small></span></button>'+
     '<div id="restorewrap" style="display:none"><textarea placeholder="Paste backup JSON here"></textarea>'+
     '<button class="sheetbtn" id="doimport">Import</button></div>'+
+    '<div class="setrow-lbl" style="margin-top:20px">Cloud Sync — free, via your GitHub</div>'+
+    (SY.token
+      ?'<div style="font-size:12px;color:var(--muted);margin:2px 0 4px" id="synclast">'+syncLabel()+'</div>'+
+       '<button class="sheetbtn" id="syncnow"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.7-9h1.8a4.5 4.5 0 1 1 0 9z"/></svg><span>Sync now<small>Push this device’s data to your private Gist</small></span></button>'+
+       '<button class="sheetbtn" id="syncrestore"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.7-9h1.8a4.5 4.5 0 1 1 0 9zM12 11v6M9 14l3 3 3-3"/></svg><span>Restore from cloud<small>Replace this device’s data with the last sync</small></span></button>'+
+       '<button class="sheetbtn danger" id="syncoff"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg><span>Disconnect<small>Stops syncing; cloud copy stays in your Gists</small></span></button>'
+      :'<p style="font-size:12px;color:var(--muted);margin:4px 0 0;line-height:1.55">Automatically backs up your logs to a <b>private Gist</b> on your own GitHub account after every change — free, no new accounts. Create a token with only the <b>gist</b> permission (GitHub → Settings → Developer settings → Personal access tokens), then paste it here. The token stays on this device.</p>'+
+       '<input id="synctokenin" type="password" autocomplete="off" placeholder="Paste GitHub token (ghp_… / github_pat_…)" style="width:100%;padding:12px;font-size:13px;margin-top:10px">'+
+       '<button class="sheetbtn" id="syncconnect"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.7-9h1.8a4.5 4.5 0 1 1 0 9z"/></svg><span>Connect &amp; sync<small>Verifies the token and pushes your first backup</small></span></button>')+
     '<button class="sheetbtn danger" id="resetbtn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14zM10 11v6M14 11v6"/></svg><span>Reset everything<small>Erase all logs and settings</small></span></button>'+
     (storageOK?'':'<p style="color:var(--danger);font-size:12px;margin-top:12px">⚠ Storage unavailable in this view — data won’t persist after closing. Use Back up to save your logs.</p>');
   sh.innerHTML=h;
@@ -1017,6 +1133,24 @@ function openSheet(){
       S=data;saveState();closeSheet();renderHeader();render();toast('Backup restored ✓');
     }catch(e){toast('That doesn’t look like a valid backup');}
   });
+  const sc=$('#syncconnect');
+  if(sc)sc.addEventListener('click',()=>{
+    const t=$('#synctokenin').value.trim();
+    if(!t){toast('Paste a token first');return;}
+    SY.token=t;SY.gistId='';saveSync();
+    pushCloud(true).then(()=>openSheet());
+  });
+  const sn=$('#syncnow');if(sn)sn.addEventListener('click',()=>pushCloud(true));
+  const sr=$('#syncrestore');
+  if(sr)sr.addEventListener('click',function(){
+    if(this.dataset.armed){restoreCloud();}
+    else{this.dataset.armed='1';
+      this.querySelector('span').innerHTML='Tap again to confirm<small>Replaces data on this device with the cloud copy</small>';
+      setTimeout(()=>{delete this.dataset.armed;
+        if(document.body.contains(this))this.querySelector('span').innerHTML='Restore from cloud<small>Replace this device’s data with the last sync</small>';},2600);}
+  });
+  const so=$('#syncoff');
+  if(so)so.addEventListener('click',()=>{SY={token:'',gistId:'',last:0};saveSync();openSheet();toast('Cloud sync disconnected');});
   $('#resetbtn').addEventListener('click',function(){
     if(this.dataset.armed){S={settings:{phase:0,week:0,anchor:iso(mondayOf(new Date()))},logs:{}};saveState();closeSheet();renderHeader();render();toast('All data reset');}
     else{this.dataset.armed='1';this.querySelector('span').innerHTML='Tap again to confirm<small>This erases everything</small>';
