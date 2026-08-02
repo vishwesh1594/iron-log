@@ -578,6 +578,7 @@ let S=loadState()||{settings:{phase:0,week:0,anchor:null},logs:{}};
 if(!S.settings)S.settings={phase:0,week:0,anchor:null};
 if(!S.logs)S.logs={};
 if(!S.bw)S.bw={};
+if(!S.swap)S.swap={};
 
 /* cloud-sync config lives in its own key so tokens never enter the synced payload */
 let SY={token:'',gistId:'',last:0};
@@ -591,12 +592,27 @@ function mondayOf(d){const x=new Date(d);const day=(x.getDay()+6)%7;x.setDate(x.
 function todayDayKey(){return DAY_KEYS[(new Date().getDay()+6)%7];}
 /* date (ISO) of the selected pill in the viewed week (weekOff weeks from now) */
 function selDate(){const m=mondayOf(new Date());m.setDate(m.getDate()+ui.weekOff*7+DAY_KEYS.indexOf(ui.selDay));return iso(m);}
-/* which phase+week of the program a viewed week maps to, rolling across phases */
+function weekdayKey(dateISO){return DAY_KEYS[(new Date(dateISO+'T12:00:00').getDay()+6)%7];}
+/* effective workout template for a date — honours day swaps */
+function effKey(dateISO,dayKey){return S.swap[dateISO]||dayKey;}
+/* which phase+week of the program a viewed week maps to, anchored to the
+   week the current phase/week was set (so a mid-week or Sunday start
+   doesn't lose its first week), rolling across phases */
 function progAt(off){
-  let p=S.settings.phase,w=S.settings.week+off;
+  const a=mondayOf(new Date((S.settings.anchor||todayISO())+'T12:00:00'));
+  const vm=mondayOf(new Date());vm.setDate(vm.getDate()+off*7);
+  const d=Math.round((vm-a)/(7*864e5));
+  let p=S.settings.phase,w=S.settings.week+d;
   while(w>3&&p<PROGRAM.length-1){w-=4;p++;}
   while(w<0&&p>0){p--;w+=4;}
   return{p:p,w:Math.max(0,Math.min(3,w))};
+}
+/* anchor rule: selecting a phase/week starts that week from the coming
+   Monday unless today already is Monday */
+function anchorForNewSelection(){
+  const m=mondayOf(new Date());
+  if(iso(m)!==todayISO()){m.setDate(m.getDate()+7);}
+  return iso(m);
 }
 
 /* auto-advance week: anchored to the Monday of the week it was set */
@@ -702,7 +718,7 @@ async function pushCloud(manual){
   finally{syncBusy=false;if(syncQueued){syncQueued=false;scheduleSync();}}
 }
 async function pushCloudInner(manual){
-  const payload=JSON.stringify({settings:S.settings,logs:S.logs,bw:S.bw},null,1);
+  const payload=JSON.stringify({settings:S.settings,logs:S.logs,bw:S.bw,swap:S.swap},null,1);
   const body={description:'IRON·LOG data backup (auto-synced)',files:{'ironlog-backup.json':{content:payload}}};
   try{
     let res;
@@ -739,7 +755,7 @@ async function restoreCloud(){
     if(f.truncated){content=await (await fetch(f.raw_url)).text();}
     const data=JSON.parse(content);
     if(!data.settings||!data.logs)throw 0;
-    S={settings:data.settings,logs:data.logs,bw:data.bw||{}};
+    S={settings:data.settings,logs:data.logs,bw:data.bw||{},swap:data.swap||{}};
     saveState();closeSheet();renderHeader();render();toast('Restored from cloud ✓');
   }catch(e){toast('Could not restore from cloud');}
 }
@@ -781,8 +797,12 @@ function spawnLift(row){
 }
 
 /* ============================================================ SHARE ============================================================ */
+function swapBtn(){
+  return '<button class="iconbtn" id="swapbtn" aria-label="Swap this day\u2019s workout" style="margin-left:auto;flex:none">'+
+    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5M21 3l-7 7M8 21H3v-5M3 21l7-7"/></svg></button>';
+}
 function shareBtn(){
-  return '<button class="iconbtn" id="sharebtn" aria-label="Share this day" style="margin-left:auto;flex:none">'+
+  return '<button class="iconbtn" id="sharebtn" aria-label="Share this day" style="margin-left:8px;flex:none">'+
     '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/></svg></button>';
 }
 function buildShareText(dayKey,tISO,vP,vW){
@@ -847,7 +867,7 @@ function renderHeader(){
     el.className='daypill'+(k===ui.selDay?' sel':'')+(ui.weekOff===0&&k===tk?' today':'');
     const dl=S.logs[iso(d)];
     if(dl&&((dl.sets&&Object.values(dl.sets).some(a=>a.some(s=>s&&s.d)))||(dl.checks&&Object.values(dl.checks).some(Boolean))))el.classList.add('logged');
-    el.innerHTML='<span class="dw">'+k.slice(0,3).toUpperCase()+'</span><span class="dn">'+d.getDate()+'</span><span class="dot"></span>';
+    el.innerHTML='<span class="dw">'+k.slice(0,3).toUpperCase()+(S.swap[iso(d)]?'<span style="color:var(--accent)"> \u21C4</span>':'')+'</span><span class="dn">'+d.getDate()+'</span><span class="dot"></span>';
     el.addEventListener('click',()=>{ui.selDay=k;renderHeader();render();});
     strip.appendChild(el);
   });
@@ -868,8 +888,9 @@ function setsDoneCount(l,day,wk){
 function renderToday(){
   const v=$('#view');
   const pos=progAt(ui.weekOff), vP=pos.p, vW=pos.w;
-  const dayKey=ui.selDay, ph=PROGRAM[vP], day=ph.days[dayKey];
   const tISO=selDate();               /* each weekday logs against its own date */
+  const dayKey=effKey(tISO,ui.selDay), ph=PROGRAM[vP], day=ph.days[dayKey];
+  const swapped=dayKey!==ui.selDay;
   const isToday=tISO===todayISO();
   const l=log(tISO);
   const editable=true;
@@ -878,7 +899,8 @@ function renderToday(){
   if(day.steps||day.rest){
     const checked=l&&l.checks&&l.checks.goal;
     h+='<div class="sessionhead"><div><h1>'+(day.rest?'Rest Day':'Active Recovery')+'</h1>'+
-       '<div class="sub">'+fmtDate(tISO)+(day.rest?' · Recovery':'')+'</div></div>'+shareBtn()+'</div>';
+       '<div class="sub">'+fmtDate(tISO)+(day.rest?' · Recovery':'')+'</div></div>'+swapBtn()+shareBtn()+'</div>';
+    if(swapped)h+='<div style="margin:-2px 0 12px"><span class="futurechip">\u21C4 Swapped \u00B7 doing '+DAY_NAMES[dayKey]+'\u2019s session</span></div>';
     if(!isToday)h+='<div style="margin:-2px 0 12px"><span class="futurechip">'+(tISO>todayISO()?'Logging ahead':'Backfilling')+' · '+fmtDate(tISO)+' · '+ph.name+' W'+(vW+1)+'</span></div>';
     h+=bwCard(tISO);
     h+='<div class="restcard"><div class="big">'+(day.rest?'REST':'10K')+'</div>'+
@@ -898,8 +920,9 @@ function renderToday(){
       '<div class="ring"><svg width="56" height="56"><circle cx="28" cy="28" r="24" fill="none" stroke="var(--line)" stroke-width="5"/>'+
       '<circle cx="28" cy="28" r="24" fill="none" stroke="'+(pct>=100?'var(--good)':'var(--accent)')+'" stroke-width="5" stroke-linecap="round" stroke-dasharray="'+C+'" stroke-dashoffset="'+(C*(1-pct/100))+'"/></svg>'+
       '<div class="pct">'+pct+'<span style="font-size:9px">%</span></div></div>'+
-      '<div><h1>'+esc(day.title)+'</h1><div class="sub">'+fmtDate(tISO)+(day.sub?' · '+esc(day.sub):'')+' · '+p.done+' / '+p.total+' sets</div></div>'+shareBtn()+'</div>';
+      '<div><h1>'+esc(day.title)+'</h1><div class="sub">'+fmtDate(tISO)+(day.sub?' · '+esc(day.sub):'')+' · '+p.done+' / '+p.total+' sets</div></div>'+swapBtn()+shareBtn()+'</div>';
 
+    if(swapped)h+='<div style="margin:-2px 0 12px"><span class="futurechip">\u21C4 Swapped \u00B7 doing '+DAY_NAMES[dayKey]+'\u2019s session</span></div>';
     if(!isToday)h+='<div style="margin:-2px 0 12px"><span class="futurechip">'+(tISO>todayISO()?'Logging ahead':'Backfilling')+' · '+fmtDate(tISO)+' · '+ph.name+' W'+(vW+1)+'</span></div>';
     h+=bwCard(tISO);
     /* warm-up */
@@ -1058,6 +1081,8 @@ function bindToday(dayKey,tISO,vP,vW){
   });
   const sh=v.querySelector('#sharebtn');
   if(sh)sh.addEventListener('click',()=>shareDay(dayKey,tISO,vP,vW));
+  const sw=v.querySelector('#swapbtn');
+  if(sw)sw.addEventListener('click',()=>openSwapSheet(tISO,vP));
   const bw=v.querySelector('#bwin');
   if(bw)bw.addEventListener('change',()=>{
     const raw=bw.value.trim().replace(',','.');
@@ -1236,11 +1261,11 @@ function openSheet(){
   sh.innerHTML=h;
   sh.classList.add('show');$('#scrim').classList.add('show');
   sh.querySelectorAll('[data-sp]').forEach(b=>b.addEventListener('click',()=>{
-    S.settings.phase=+b.dataset.sp;S.settings.week=0;S.settings.anchor=iso(mondayOf(new Date()));
+    S.settings.phase=+b.dataset.sp;S.settings.week=0;S.settings.anchor=anchorForNewSelection();
     planPhase=null;planWeek=null;saveState();renderHeader();render();openSheet();
   }));
   sh.querySelectorAll('[data-sw]').forEach(b=>b.addEventListener('click',()=>{
-    S.settings.week=+b.dataset.sw;S.settings.anchor=iso(mondayOf(new Date()));
+    S.settings.week=+b.dataset.sw;S.settings.anchor=anchorForNewSelection();
     saveState();renderHeader();render();openSheet();
   }));
   $('#backupbtn').addEventListener('click',doBackup);
@@ -1300,6 +1325,46 @@ async function doBackup(){
   try{await navigator.clipboard.writeText(json);toast('Backup copied to clipboard — paste it somewhere safe');}
   catch(e){toast('Could not export — long-press to copy from Restore box');
     const w=$('#restorewrap');if(w){w.style.display='block';w.querySelector('textarea').value=json;}}
+}
+
+/* ============================================================ DAY SWAP ============================================================ */
+function dayTitleFor(vP,key){
+  const d=PROGRAM[vP].days[key];
+  return d.title?d.title+(d.sub?' ('+d.sub+')':''):(d.rest?'Rest':'10K steps');
+}
+function doSwap(aISO,bISO){
+  const ea=effKey(aISO,weekdayKey(aISO)), eb=effKey(bISO,weekdayKey(bISO));
+  S.swap[aISO]=eb;S.swap[bISO]=ea;
+  if(S.swap[aISO]===weekdayKey(aISO))delete S.swap[aISO];
+  if(S.swap[bISO]===weekdayKey(bISO))delete S.swap[bISO];
+  saveState();
+}
+function openSwapSheet(tISO,vP){
+  const sh=$('#sheet');
+  const mon=mondayOf(new Date());mon.setDate(mon.getDate()+ui.weekOff*7);
+  const days=DAY_KEYS.map((k,i)=>{const d=new Date(mon);d.setDate(d.getDate()+i);return{k:k,iso:iso(d)};});
+  const anySwap=days.some(d=>S.swap[d.iso]);
+  let h='<div class="grab"></div><h3>Swap this day</h3>'+
+    '<p style="font-size:12.5px;color:var(--muted);margin:2px 0 6px;line-height:1.5">Trade <b>'+fmtDate(tISO)+
+    '</b> ('+esc(dayTitleFor(vP,effKey(tISO,weekdayKey(tISO))))+') with another day this week. Both days exchange their sessions.</p>';
+  days.forEach(d=>{
+    if(d.iso===tISO)return;
+    h+='<button class="sheetbtn" data-swapwith="'+d.iso+'"><span style="font-family:var(--disp);font-weight:700;letter-spacing:.08em;width:38px;color:var(--faint)">'+d.k.slice(0,3).toUpperCase()+'</span>'+
+      '<span>'+esc(dayTitleFor(vP,effKey(d.iso,d.k)))+'<small>'+fmtDate(d.iso)+(S.swap[d.iso]?' · swapped':'')+'</small></span></button>';
+  });
+  if(anySwap)h+='<button class="sheetbtn danger" id="swapreset"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg><span>Reset this week to the plan<small>Removes all swaps in this week</small></span></button>';
+  sh.innerHTML=h;
+  sh.classList.add('show');$('#scrim').classList.add('show');
+  sh.querySelectorAll('[data-swapwith]').forEach(b=>b.addEventListener('click',()=>{
+    doSwap(tISO,b.dataset.swapwith);
+    closeSheet();renderHeader();render();
+    toast('Swapped \u2014 '+fmtDate(tISO)+' now: '+dayTitleFor(vP,effKey(tISO,weekdayKey(tISO))));
+  }));
+  const rs=sh.querySelector('#swapreset');
+  if(rs)rs.addEventListener('click',()=>{
+    days.forEach(d=>{delete S.swap[d.iso];});
+    saveState();closeSheet();renderHeader();render();toast('Week reset to the plan');
+  });
 }
 
 /* ============================================================ TABS + BOOT ============================================================ */
